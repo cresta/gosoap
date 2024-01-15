@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -187,6 +186,13 @@ func (c *Client) Do(req *Request) (res *Response, err error) {
 
 	b, err := p.doRequest(c.Definitions.Services[0].Ports[0].SoapAddresses[0].Location)
 	if err != nil {
+		var soapError SoapFaultEnvelope
+		decoder := xml.NewDecoder(bytes.NewReader(b))
+		decoder.CharsetReader = charset.NewReaderLabel
+		decodeErr := decoder.Decode(&soapError)
+		if decodeErr == nil && soapError.Body.Fault.Faultcode != "" {
+			err = fmt.Errorf("%w: %s (%s)", err, soapError.Body.Fault.Faultcode, soapError.Body.Fault.Faultstring)
+		}
 		return nil, ErrorWithPayload{err, p.Payload}
 	}
 
@@ -262,16 +268,14 @@ func (p *process) doRequest(url string) ([]byte, error) {
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
-		if !(p.Client.config != nil && p.Client.config.Dump) {
-			_, err := io.Copy(ioutil.Discard, resp.Body)
-			if err != nil {
-				return nil, err
-			}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("unexpected status code - failed to read body: %s - %w", resp.Status, err)
 		}
-		return nil, errors.New("unexpected status code: " + resp.Status)
+		return body, errors.New("unexpected status code: " + resp.Status)
 	}
 
-	return ioutil.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
 }
 
 func (p *process) httpClient() *http.Client {
@@ -312,4 +316,24 @@ type SoapHeader struct {
 type SoapBody struct {
 	XMLName  struct{} `xml:"Body"`
 	Contents []byte   `xml:",innerxml"`
+}
+
+// SoapEnvelope fault in body struct
+type SoapFaultEnvelope struct {
+	XMLName struct{} `xml:"Envelope"`
+	Header  SoapHeader
+	Body    SoapFaultBody
+}
+
+// SoapFaultBody struct
+type SoapFaultBody struct {
+	XMLName struct{} `xml:"Body"`
+	Fault   SoapFault
+}
+
+// SoapFault struct
+type SoapFault struct {
+	XMLName     struct{} `xml:"Fault"`
+	Faultcode   string   `xml:"faultcode"`
+	Faultstring string   `xml:"faultstring"`
 }

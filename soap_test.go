@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -182,6 +183,14 @@ func TestClient_Call(t *testing.T) {
 
 	if rw.WhoisResult != "0" {
 		t.Errorf("error: %+v", rw)
+	}
+
+	_, err = soap.Call("Whatever", Params{"DomainName": "google.com"})
+	if err == nil {
+		t.Errorf("error expected but nothing got.")
+	}
+	if !strings.Contains(err.Error(), "Unable to handle request without a valid action parameter") {
+		t.Errorf("expected error message to contain fault message")
 	}
 
 	c := &Client{}
